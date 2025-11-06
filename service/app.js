@@ -16,15 +16,24 @@ app.post('/delta', async function (req, res) {
     const delta = req.body;
 
     const inserts = flatten(delta.map(changeSet => changeSet.inserts));
-    if (!inserts.length) {
-        console.log('Inserts is empty');
-        return res.status(204).send();
-    }
+    const deletes = flatten(delta.map(changeSet => changeSet.deletes));
 
-    const subject = inserts[0].subject.value;
-    const ratingUri = sparqlEscapeUri(subject);
+    console.log("inserts")
+    console.log(inserts)
 
-    const averageQuery = `
+    console.log("deletes")
+    console.log(deletes)
+
+    const ITEM_REVIEWED = 'http://schema.org/itemReviewed';
+
+    if (inserts.length) {
+        const itemReviewedInsert = inserts.find(
+            t => t.predicate.value === ITEM_REVIEWED
+        );
+        const albumUri = sparqlEscapeUri(itemReviewedInsert.object.value);
+
+
+        const avgQuery = `
         PREFIX schema: <http://schema.org/>
         PREFIX xsd:    <http://www.w3.org/2001/XMLSchema#>
         
@@ -40,15 +49,12 @@ app.post('/delta', async function (req, res) {
         }
         WHERE {
           GRAPH <http://mu.semte.ch/graphs/public> {
-            VALUES ?rating { ${ratingUri} }
-            ?rating schema:itemReviewed ?album .
-        
-            OPTIONAL { ?album schema:ratingValue ?oldAvg . }
-        
             {
               SELECT ?album (AVG(xsd:decimal(?score)) AS ?newAvg)
               WHERE {
                 GRAPH <http://mu.semte.ch/graphs/public> {
+                  VALUES ?album { ${albumUri} }
+                          
                   ?r a schema:Review ;
                      schema:itemReviewed ?album ;
                      schema:reviewRating ?score .
@@ -56,11 +62,62 @@ app.post('/delta', async function (req, res) {
               }
               GROUP BY ?album
             }
+            OPTIONAL { ?album schema:ratingValue ?oldAvg . }
+          }
+        }`;
+
+        query(avgQuery).then(function (response) {
+            return res.status(204).send();
+        });
+    } else if (deletes.length) {
+        console.log("inserts are empty")
+        const itemReviewedDelete = deletes.find(
+            t => t.predicate.value === ITEM_REVIEWED
+        );
+        const albumUri = sparqlEscapeUri(itemReviewedDelete.object.value);
+
+        const avgQuery = `
+        PREFIX schema: <http://schema.org/>
+        PREFIX xsd:    <http://www.w3.org/2001/XMLSchema#>
+        
+        DELETE {
+          GRAPH <http://mu.semte.ch/graphs/public> {
+            ?album schema:ratingValue ?oldAvg .
           }
         }
-    `;
+        INSERT {
+          GRAPH <http://mu.semte.ch/graphs/public> {
+            ?album schema:ratingValue ?newAvg .
+          }
+        }
+        WHERE {
+          GRAPH <http://mu.semte.ch/graphs/public> {
+            {
+              SELECT ?album (COALESCE(?avg, 0) AS ?newAvg)
+              WHERE {
+                VALUES ?album { ${albumUri} }
+        
+                OPTIONAL {
+                  SELECT ?album (AVG(?scoreDec) AS ?avg)
+                  WHERE {
+                    ?r a schema:Review ;
+                       schema:itemReviewed ?album ;
+                       schema:reviewRating ?score .
+                    BIND(xsd:decimal(?score) AS ?scoreDec)
+                  }
+                  GROUP BY ?album
+                }
+              }
+            }
+            OPTIONAL { ?album schema:ratingValue ?oldAvg . }
+          }
+}`;
 
-    query(averageQuery).then(function (response) {
+        query(avgQuery).then(function (response) {
+            return res.status(204).send();
+        });
+    } else {
+        console.log("inserts and deletes are empty")
         return res.status(204).send();
-    });
+    }
 });
