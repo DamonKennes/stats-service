@@ -14,15 +14,8 @@ app.get('/hello', function (req, res) {
 
 app.post('/delta', async function (req, res) {
     const delta = req.body;
-
     const inserts = flatten(delta.map(changeSet => changeSet.inserts));
     const deletes = flatten(delta.map(changeSet => changeSet.deletes));
-
-    console.log("inserts")
-    console.log(inserts)
-
-    console.log("deletes")
-    console.log(deletes)
 
     const ITEM_REVIEWED = 'http://schema.org/itemReviewed';
 
@@ -70,7 +63,6 @@ app.post('/delta', async function (req, res) {
             return res.status(204).send();
         });
     } else if (deletes.length) {
-        console.log("inserts are empty")
         const itemReviewedDelete = deletes.find(
             t => t.predicate.value === ITEM_REVIEWED
         );
@@ -117,7 +109,6 @@ app.post('/delta', async function (req, res) {
             return res.status(204).send();
         });
     } else {
-        console.log("inserts and deletes are empty")
         return res.status(204).send();
     }
 });
