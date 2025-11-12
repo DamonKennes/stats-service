@@ -18,57 +18,17 @@ app.post('/delta', async function (req, res) {
     const deletes = flatten(delta.map(changeSet => changeSet.deletes));
 
     const ITEM_REVIEWED = 'http://schema.org/itemReviewed';
+    const albumTriple =
+        inserts.find(t => t.predicate?.value === ITEM_REVIEWED) ||
+        deletes.find(t => t.predicate?.value === ITEM_REVIEWED);
 
-    if (inserts.length) {
-        const itemReviewedInsert = inserts.find(
-            t => t.predicate.value === ITEM_REVIEWED
-        );
-        const albumUri = sparqlEscapeUri(itemReviewedInsert.object.value);
+    if (!albumTriple) {
+        return res.status(204).send();
+    }
 
+    const albumUri = sparqlEscapeUri(albumTriple.object.value);
 
-        const avgQuery = `
-        PREFIX schema: <http://schema.org/>
-        PREFIX xsd:    <http://www.w3.org/2001/XMLSchema#>
-        
-        DELETE {
-          GRAPH <http://mu.semte.ch/graphs/public> {
-            ?album schema:ratingValue ?oldAvg .
-          }
-        }
-        INSERT {
-          GRAPH <http://mu.semte.ch/graphs/public> {
-            ?album schema:ratingValue ?newAvg .
-          }
-        }
-        WHERE {
-          GRAPH <http://mu.semte.ch/graphs/public> {
-            {
-              SELECT ?album (AVG(xsd:decimal(?score)) AS ?newAvg)
-              WHERE {
-                GRAPH <http://mu.semte.ch/graphs/public> {
-                  VALUES ?album { ${albumUri} }
-                          
-                  ?r a schema:Review ;
-                     schema:itemReviewed ?album ;
-                     schema:reviewRating ?score .
-                }
-              }
-              GROUP BY ?album
-            }
-            OPTIONAL { ?album schema:ratingValue ?oldAvg . }
-          }
-        }`;
-
-        query(avgQuery).then(function (response) {
-            return res.status(204).send();
-        });
-    } else if (deletes.length) {
-        const itemReviewedDelete = deletes.find(
-            t => t.predicate.value === ITEM_REVIEWED
-        );
-        const albumUri = sparqlEscapeUri(itemReviewedDelete.object.value);
-
-        const avgQuery = `
+    const avgQuery = `
         PREFIX schema: <http://schema.org/>
         PREFIX xsd:    <http://www.w3.org/2001/XMLSchema#>
         
@@ -90,12 +50,11 @@ app.post('/delta', async function (req, res) {
                 VALUES ?album { ${albumUri} }
         
                 OPTIONAL {
-                  SELECT ?album (AVG(?scoreDec) AS ?avg)
+                  SELECT ?album (AVG(xsd:decimal(?score)) AS ?avg)
                   WHERE {
                     ?r a schema:Review ;
                        schema:itemReviewed ?album ;
                        schema:reviewRating ?score .
-                    BIND(xsd:decimal(?score) AS ?scoreDec)
                   }
                   GROUP BY ?album
                 }
@@ -103,12 +62,9 @@ app.post('/delta', async function (req, res) {
             }
             OPTIONAL { ?album schema:ratingValue ?oldAvg . }
           }
-}`;
+        }`;
 
-        query(avgQuery).then(function (response) {
-            return res.status(204).send();
-        });
-    } else {
+    query(avgQuery).then(function (response) {
         return res.status(204).send();
-    }
-});
+    });
+})
